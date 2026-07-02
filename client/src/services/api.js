@@ -20,8 +20,19 @@ export const getAccessToken = () => {
   return accessToken;
 };
 
+const getBaseURL = () => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+  // Bulletproof fallback for Vercel static deployments pointing to Render
+  if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+    return 'https://ticketflow-33vf.onrender.com/api';
+  }
+  return '/api';
+};
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: getBaseURL(),
   withCredentials: true, // Crucial for receiving/sending httpOnly refresh cookies
 });
 

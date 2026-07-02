@@ -39,7 +39,16 @@ export const ChatProvider = ({ children }) => {
       return;
     }
 
-    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+    const getSocketUrl = () => {
+      if (import.meta.env.VITE_SOCKET_URL) {
+        return import.meta.env.VITE_SOCKET_URL;
+      }
+      if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+        return 'https://ticketflow-33vf.onrender.com';
+      }
+      return 'http://localhost:5000';
+    };
+    const socketUrl = getSocketUrl();
     console.log(`Connecting Socket.IO to ${socketUrl}...`);
     
     const s = io(socketUrl, {
