@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offline — TicketFlow</title>
+  <style>
+    body {
+      background-color: #0A0F1E;
+      color: #F1F5F9;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px;
+      box-sizing: border-box;
+      text-align: center;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #1E293B;
+      box-shadow: 0 0 40px rgba(99, 102, 241, 0.15);
+      border-radius: 16px;
+      padding: 40px 24px;
+      max-width: 400px;
+      width: 100%;
+    }
+    .icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 24px;
+      color: #6366F1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(99, 102, 241, 0.1);
+      border-radius: 50%;
+      border: 1px solid rgba(99, 102, 241, 0.2);
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin: 0 0 12px;
+      color: #F1F5F9;
+    }
+    p {
+      color: #94A3B8;
+      font-size: 15px;
+      line-height: 1.6;
+      margin: 0 0 32px;
+    }
+    .btn {
+      background-color: #6366F1;
+      color: #FFFFFF;
+      font-weight: 600;
+      padding: 12px 28px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 15px;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .btn:hover {
+      background-color: #818CF8;
+      box-shadow: 0 4px 20px rgba(99, 102, 241, 0.5);
+      transform: translateY(-1px);
+    }
+    .btn:active {
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M1 1t 4 4 0 0 1 0 5.66L1.41 12"></path>
+        <path d="M5 5a10 10 0 0 1 14 0"></path>
+        <path d="M8.5 8.5a5 5 0 0 1 7 0"></path>
+        <path d="M12 12a1 1 0 1 0 0 2 1 1 0 1 0 0-2Z"></path>
+        <line x1="1" y1="1" x2="23" y2="23"></line>
+      </svg>
+    </div>
+    <h1>You are Offline</h1>
+    <p>TicketFlow cannot connect to the network right now. Some features may be limited, but you can continue browsing your cached tickets.</p>
+    <button class="btn" onclick="window.location.reload()">Retry Connection</button>
+  </div>
+</body>
+</html>
