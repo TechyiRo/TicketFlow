@@ -21,11 +21,26 @@ const pushRoutes = require('./routes/pushRoutes');
 const app = express();
 const server = http.createServer(app);
 
+// Dynamic CORS Origin Validator
+const dynamicOriginCheck = (origin, callback) => {
+  if (!origin) return callback(null, true);
+  
+  const isLocalhost = origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
+  const isVercel = origin.endsWith('.vercel.app');
+  const isCustomClient = process.env.CLIENT_URL && origin === process.env.CLIENT_URL;
+
+  if (isLocalhost || isVercel || isCustomClient) {
+    callback(null, true);
+  } else {
+    callback(new Error('Not allowed by CORS'));
+  }
+};
+
 // Initialize Socket.io
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    origin: dynamicOriginCheck,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     credentials: true,
   },
 });
@@ -35,7 +50,7 @@ connectDB();
 
 // Middlewares
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: dynamicOriginCheck,
   credentials: true,
 }));
 app.use(express.json());
