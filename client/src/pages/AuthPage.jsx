@@ -7,7 +7,7 @@ import Space3DBackground from '../components/shared/Space3DBackground';
 import { Shield, Zap, Ticket as TicketIcon } from 'lucide-react';
 
 export function AuthPage() {
-  const { user, login, registerUser } = useAuth();
+  const { user, login, registerUser, registerEmployee } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [mounted, setMounted] = useState(false);
 
@@ -25,6 +25,8 @@ export function AuthPage() {
       await login(args[0], args[1]); // username, password
     } else if (type === 'registerUser') {
       await registerUser(...args);
+    } else if (type === 'registerEmployee') {
+      await registerEmployee(...args);
     }
   };
 
