@@ -126,26 +126,27 @@ const startReminderDaemon = () => {
         let failCount = 0;
 
         const payload = JSON.stringify({
-          notification: {
-            title: item.title,
-            body: `Reminder: ${item.description || 'Your task is starting soon'}`,
-            icon: '/icons/icon-192x192.png',
-            badge: '/icons/icon-72x72.png',
-            data: {
-              itemId: item._id.toString(),
-              actionToken,
-              url: `${process.env.CLIENT_URL || 'http://localhost:5173'}/schedule?date=${new Date(item.startTime).toISOString().split('T')[0]}`
-            },
-            actions: [
-              { action: 'mark_done', title: 'Mark Done' },
-              { action: 'snooze', title: 'Snooze 10m' }
-            ]
-          }
+          type: 'SCHEDULE',
+          title: item.title,
+          body: 'Reminder: this item is due now',
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-72x72.png',
+          url: `/schedule?date=${new Date(item.startTime).toISOString().split('T')[0]}`,
+          tag: `schedule-${item._id.toString()}`,
+          itemId: item._id.toString(),
+          actionToken
         });
 
         for (const subRecord of subscriptions) {
           try {
-            await webpush.sendNotification(subRecord.subscription, payload);
+            const subDetails = {
+              endpoint: subRecord.endpoint,
+              keys: {
+                p256dh: subRecord.p256dh,
+                auth: subRecord.auth,
+              },
+            };
+            await webpush.sendNotification(subDetails, payload);
             successCount++;
           } catch (err) {
             console.error(`[Scheduler]: Web Push delivery failed for endpoint:`, err.message);
@@ -215,29 +216,32 @@ const startReminderDaemon = () => {
         );
 
         const payload = JSON.stringify({
-          notification: {
-            title: `[Retry] ${record.itemTitle}`,
-            body: `Missed Reminder: ${item.description || 'Your task has started'}`,
-            icon: '/icons/icon-192x192.png',
-            badge: '/icons/icon-72x72.png',
-            data: {
-              itemId: record.scheduleItemId.toString(),
-              actionToken,
-              url: `${process.env.CLIENT_URL || 'http://localhost:5173'}/schedule`
-            },
-            actions: [
-              { action: 'mark_done', title: 'Mark Done' },
-              { action: 'snooze', title: 'Snooze 10m' }
-            ]
-          }
+          type: 'SCHEDULE',
+          title: `[Retry] ${record.itemTitle}`,
+          body: `Missed Reminder: ${item.description || 'Your task has started'}`,
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-72x72.png',
+          url: `/schedule`,
+          tag: `schedule-${record.scheduleItemId.toString()}`,
+          itemId: record.scheduleItemId.toString(),
+          actionToken
         });
 
         for (const subRecord of subscriptions) {
           try {
-            await webpush.sendNotification(subRecord.subscription, payload);
+            const subDetails = {
+              endpoint: subRecord.endpoint,
+              keys: {
+                p256dh: subRecord.p256dh,
+                auth: subRecord.auth,
+              },
+            };
+            await webpush.sendNotification(subDetails, payload);
             success = true;
           } catch (err) {
-            // failed sub
+            if (err.statusCode === 410 || err.statusCode === 404) {
+              await PushSubscription.deleteOne({ _id: subRecord._id });
+            }
           }
         }
 

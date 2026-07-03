@@ -3,6 +3,8 @@ const authMiddleware = require('../middleware/auth');
 const User = require('../models/User');
 const Employee = require('../models/Employee');
 
+const PushSubscription = require('../models/PushSubscription');
+
 const router = express.Router();
 
 // Apply authentication middleware
@@ -14,16 +16,39 @@ router.use(authMiddleware);
  */
 router.post('/subscribe', async (req, res) => {
   try {
-    const { subscription } = req.body;
-    if (!subscription) {
-      return res.status(400).json({ message: 'Subscription payload is required' });
+    const { subscription, deviceFingerprint } = req.body;
+    if (!subscription || !deviceFingerprint) {
+      return res.status(400).json({ message: 'Subscription and deviceFingerprint are required' });
     }
 
-    if (req.user.role === 'user') {
-      await User.findByIdAndUpdate(req.user.id, { pushSubscription: subscription });
-    } else {
-      await Employee.findByIdAndUpdate(req.user.id, { pushSubscription: subscription });
+    const { endpoint, keys } = subscription;
+    if (!endpoint || !keys || !keys.p256dh || !keys.auth) {
+      return res.status(400).json({ message: 'Invalid subscription payload coordinates' });
     }
+
+    // Check if subscription already exists for this fingerprint & endpoint
+    let subEntry = await PushSubscription.findOne({
+      userId: req.user.id,
+      deviceFingerprint,
+      endpoint,
+    });
+
+    if (!subEntry) {
+      subEntry = new PushSubscription({
+        userId: req.user.id,
+        userModel: req.user.role === 'user' ? 'User' : 'Employee',
+        deviceFingerprint,
+        endpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+      });
+    } else {
+      // Update keys if they changed
+      subEntry.p256dh = keys.p256dh;
+      subEntry.auth = keys.auth;
+    }
+
+    await subEntry.save();
 
     return res.json({ message: 'Web Push subscription registered successfully' });
   } catch (error) {
@@ -38,10 +63,11 @@ router.post('/subscribe', async (req, res) => {
  */
 router.delete('/unsubscribe', async (req, res) => {
   try {
-    if (req.user.role === 'user') {
-      await User.findByIdAndUpdate(req.user.id, { $unset: { pushSubscription: 1 } });
+    const { deviceFingerprint } = req.body;
+    if (deviceFingerprint) {
+      await PushSubscription.deleteMany({ userId: req.user.id, deviceFingerprint });
     } else {
-      await Employee.findByIdAndUpdate(req.user.id, { $unset: { pushSubscription: 1 } });
+      await PushSubscription.deleteMany({ userId: req.user.id });
     }
 
     return res.json({ message: 'Web Push subscription removed successfully' });

@@ -1,4 +1,5 @@
 const webpush = require('web-push');
+const PushSubscription = require('../models/PushSubscription');
 const User = require('../models/User');
 const Employee = require('../models/Employee');
 
@@ -22,33 +23,50 @@ initWebPush();
 /**
  * Send web push notification to a specific user or employee by ID
  * @param {string} userId - User or Employee ObjectId
- * @param {string} role - 'user' or 'employee'
- * @param {Object} payload - Notification payload { title, body, data: { url } }
+ * @param {Object} payload - Notification payload { type, title, body, url, tag, ticketId, itemId }
  */
-const sendPushToUser = async (userId, role, payload) => {
+const sendPushToUser = async (userId, payload) => {
   try {
-    let recipient;
-    if (role === 'user') {
-      recipient = await User.findById(userId);
-    } else if (role === 'employee') {
-      recipient = await Employee.findById(userId);
-    }
-
-    if (!recipient || !recipient.pushSubscription) {
+    const subscriptions = await PushSubscription.find({ userId });
+    if (!subscriptions || subscriptions.length === 0) {
       return;
     }
 
-    const subscription = recipient.pushSubscription;
-    await webpush.sendNotification(subscription, JSON.stringify({
-      notification: {
-        title: payload.title,
-        body: payload.body,
-        icon: '/icons/icon-192x192.png',
-        badge: '/icons/icon-72x72.png',
-        data: payload.data || {},
+    const pushData = JSON.stringify({
+      type: payload.type || 'TASK',
+      title: payload.title,
+      body: payload.body,
+      icon: '/icons/icon-192x192.png',
+      badge: '/icons/icon-72x72.png',
+      url: payload.url || '/dashboard',
+      tag: payload.tag || `${payload.type || 'task'}-${payload.itemId || payload.ticketId || Date.now()}`,
+      ticketId: payload.ticketId || undefined,
+      itemId: payload.itemId || undefined,
+    });
+
+    const deliveries = subscriptions.map(async (sub) => {
+      const subDetails = {
+        endpoint: sub.endpoint,
+        keys: {
+          p256dh: sub.p256dh,
+          auth: sub.auth,
+        },
+      };
+
+      try {
+        await webpush.sendNotification(subDetails, pushData);
+      } catch (error) {
+        // If push service returns 410 (Gone) or 404 (Not Found), delete subscription from DB
+        if (error.statusCode === 410 || error.statusCode === 404) {
+          console.log(`Pruning invalid push subscription: ${sub.endpoint}`);
+          await PushSubscription.deleteOne({ _id: sub._id });
+        } else {
+          console.error(`Error delivering push payload:`, error.message);
+        }
       }
-    }));
-    console.log(`Push notification sent successfully to ${recipient.fullName}`);
+    });
+
+    await Promise.all(deliveries);
   } catch (error) {
     console.error(`Error sending push notification to user ${userId}:`, error.message);
   }

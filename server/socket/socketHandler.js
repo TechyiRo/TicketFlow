@@ -74,15 +74,13 @@ module.exports = (io) => {
           status: initialStatus,
         });
 
-        await message.save();
-
         // Convert to plain object to attach tempId
         const msgObj = message.toObject();
         if (tempId) {
           msgObj.tempId = tempId;
         }
 
-        // Emit message to everyone in the room
+        // Emit message to everyone in the room instantly
         io.to(ticketId).emit('receive_message', msgObj);
 
         // Notify client dashboard lists for activity indicator update
@@ -92,18 +90,23 @@ module.exports = (io) => {
           senderId 
         });
 
-        // Trigger push notifications
+        // Perform DB write and Push notification trigger in parallel
+        message.save().catch((dbErr) => console.error('Socket DB save error:', dbErr.message));
+
         const isUserSender = senderModel === 'User';
         const targetUserId = isUserSender ? ticket.assignedTo : ticket.createdBy;
-        const targetRole = isUserSender ? 'employee' : 'user';
 
         if (targetUserId) {
           const bodyText = content ? content.trim() : `Sent ${attachments.length} attachment(s)`;
-          await sendPushToUser(targetUserId, targetRole, {
-            title: `New Message - ${ticket.ticketId}`,
-            body: `${senderName}: ${bodyText}`,
-            data: { url: `/dashboard?ticketId=${ticket._id}&chat=true` },
-          });
+          const bodySnippet = bodyText.substring(0, 80);
+          sendPushToUser(targetUserId, {
+            type: 'CHAT',
+            title: senderName,
+            body: bodySnippet,
+            url: `/dashboard?ticketId=${ticket._id}&chat=true`,
+            tag: ticket._id.toString(),
+            ticketId: ticket._id.toString(),
+          }).catch((pushErr) => console.error('Socket chat push error:', pushErr.message));
         }
       } catch (err) {
         console.error('Socket send_message error:', err.message);
@@ -217,6 +220,20 @@ module.exports = (io) => {
           title: ticket.title
         });
 
+        // Send push notification to target remote participant
+        const isUserCaller = callerId === ticket.createdBy.toString();
+        const targetUserId = isUserCaller ? ticket.assignedTo : ticket.createdBy;
+        if (targetUserId) {
+          sendPushToUser(targetUserId, {
+            type: 'CALL',
+            title: 'Incoming Call',
+            body: `${callerName} is calling about ticket: ${ticket.title}`,
+            url: `/dashboard?ticketId=${ticket._id}&call=true`,
+            tag: `call-${ticket._id.toString()}`,
+            ticketId: ticket._id.toString(),
+          }).catch(pushErr => console.error('Call push notification failed:', pushErr.message));
+        }
+
         // Broadcast updated active calls mapping to all connected devices
         io.emit('active_calls_update', Array.from(activeCalls.keys()));
       } catch (err) {
@@ -286,6 +303,28 @@ module.exports = (io) => {
           io.to(`call-${ticketIdStr}`).emit('call_ended', { ticketId: ticketIdStr });
           io.emit('active_calls_update', Array.from(activeCalls.keys()));
         }
+      }
+    });
+
+    // Heartbeat ping-pong relay
+    socket.on('ping_heartbeat', () => {
+      socket.emit('pong_heartbeat');
+    });
+
+    // Sync missed messages during disconnection window
+    socket.on('request_missed_messages', async ({ ticketId, lastMessageId }) => {
+      try {
+        const lastMsg = await Message.findById(lastMessageId);
+        const query = { ticketId };
+        if (lastMsg) {
+          query.createdAt = { $gt: lastMsg.createdAt };
+        }
+        const missed = await Message.find(query).sort({ createdAt: 1 });
+        for (const msg of missed) {
+          socket.emit('receive_message', msg.toObject());
+        }
+      } catch (err) {
+        console.error('Socket request_missed_messages error:', err.message);
       }
     });
 

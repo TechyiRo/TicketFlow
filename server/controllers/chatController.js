@@ -79,17 +79,20 @@ exports.sendMessage = async (req, res) => {
     // Trigger push notification to other participant
     const isUserSender = req.user.role === 'user';
     const targetUserId = isUserSender ? ticket.assignedTo : ticket.createdBy;
-    const targetRole = isUserSender ? 'employee' : 'user';
 
     if (targetUserId) {
       const bodyText = hasContent 
         ? content.trim() 
         : `Sent ${attachments.length} attachment(s)`;
+      const bodySnippet = bodyText.substring(0, 80);
 
-      await sendPushToUser(targetUserId, targetRole, {
-        title: `New Message - ${ticket.ticketId}`,
-        body: `${req.user.fullName}: ${bodyText}`,
-        data: { url: `/dashboard?ticketId=${ticket._id}&chat=true` },
+      await sendPushToUser(targetUserId, {
+        type: 'CHAT',
+        title: req.user.fullName,
+        body: bodySnippet,
+        url: `/dashboard?ticketId=${ticket._id}&chat=true`,
+        tag: ticket._id.toString(),
+        ticketId: ticket._id.toString(),
       });
     }
 

@@ -93,6 +93,23 @@ exports.createTicket = async (req, res) => {
       .populate('createdBy', 'fullName username avatar company logo')
       .populate('assignedTo', 'fullName username avatar department');
 
+    // Notify admins of new ticket submission
+    try {
+      const admins = await Employee.find({ role: 'admin' });
+      for (const admin of admins) {
+        await sendPushToUser(admin._id, {
+          type: 'TASK',
+          title: 'New Ticket Received',
+          body: `${priority.toUpperCase()} - ${title}`,
+          url: `/dashboard?ticketId=${newTicket._id}`,
+          tag: newTicket._id.toString(),
+          ticketId: newTicket._id.toString(),
+        });
+      }
+    } catch (pushErr) {
+      console.error('Error notifying admins of new ticket:', pushErr);
+    }
+
     return res.status(201).json(populatedTicket);
   } catch (error) {
     console.error('Create ticket error:', error);
@@ -172,10 +189,13 @@ exports.updateTicketStatus = async (req, res) => {
       ? `Your ticket ${ticket.ticketId} has been marked as Resolved.` 
       : `Ticket ${ticket.ticketId} status has changed to ${status.replace('_', ' ')}.`;
 
-    await sendPushToUser(ticket.createdBy, 'user', {
-      title,
-      body,
-      data: { url: `/dashboard?ticketId=${ticket._id}` },
+    await sendPushToUser(ticket.createdBy, {
+      type: 'TASK',
+      title: 'Ticket Updated',
+      body: `Status changed to ${status.replace('_', ' ')}`,
+      url: `/dashboard?ticketId=${ticket._id}`,
+      tag: ticket._id.toString(),
+      ticketId: ticket._id.toString(),
     });
 
     // Emit Socket.IO events
@@ -245,10 +265,13 @@ exports.assignTicket = async (req, res) => {
       details = `Assigned ticket to ${employee.fullName} (previously assigned to ${oldAssigneeName})`;
 
       // Send push notification to assigned employee
-      await sendPushToUser(employeeId, 'employee', {
+      await sendPushToUser(employeeId, {
+        type: 'TASK',
         title: 'New Ticket Assigned',
-        body: `${ticket.ticketId}: ${ticket.title}`,
-        data: { url: `/dashboard?ticketId=${ticket._id}` },
+        body: ticket.title,
+        url: `/dashboard?ticketId=${ticket._id}`,
+        tag: ticket._id.toString(),
+        ticketId: ticket._id.toString(),
       });
     }
 
@@ -325,17 +348,23 @@ exports.addComment = async (req, res) => {
     // Send push notification to opposite party
     if (req.user.role === 'user') {
       if (ticket.assignedTo) {
-        await sendPushToUser(ticket.assignedTo, 'employee', {
+        await sendPushToUser(ticket.assignedTo, {
+          type: 'TASK',
           title: 'New Ticket Comment',
           body: `${req.user.fullName} commented on ${ticket.ticketId}`,
-          data: { url: `/dashboard?ticketId=${ticket._id}` },
+          url: `/dashboard?ticketId=${ticket._id}`,
+          tag: ticket._id.toString(),
+          ticketId: ticket._id.toString(),
         });
       }
     } else {
-      await sendPushToUser(ticket.createdBy, 'user', {
+      await sendPushToUser(ticket.createdBy, {
+        type: 'TASK',
         title: 'Support Team Comment',
         body: `${req.user.fullName} commented on your ticket ${ticket.ticketId}`,
-        data: { url: `/dashboard?ticketId=${ticket._id}` },
+        url: `/dashboard?ticketId=${ticket._id}`,
+        tag: ticket._id.toString(),
+        ticketId: ticket._id.toString(),
       });
     }
 

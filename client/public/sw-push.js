@@ -1,86 +1,159 @@
 /**
- * Production-grade Service Worker extension for handling Daily Schedule push notifications and background timers.
+ * Service Worker extension for handling Daily Schedule push notifications, IndexedDB reminders synchronization, and deep linking actions.
  */
 
-// Internal state of scheduled reminders: array of { id, title, description, reminderTime, triggered: boolean }
-let remindersSchedule = [];
+const DB_NAME = 'TicketFlowRemindersDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'reminders';
 
-// Periodic checker interval (every 30 seconds)
-setInterval(() => {
-  const now = new Date();
-  
-  remindersSchedule.forEach((item) => {
-    if (!item.triggered && new Date(item.reminderTime) <= now) {
-      item.triggered = true;
-      
-      // Trigger OS notification tray popup
-      const options = {
-        body: `Reminder: ${item.description || 'Your task is starting soon.'}`,
-        icon: '/icons/icon-192x192.png',
-        badge: '/icons/icon-72x72.png',
-        vibrate: [300, 100, 300, 100, 400],
-        tag: item.id,
-        requireInteraction: true,
-        data: {
-          itemId: item.id,
-          url: '/schedule'
-        },
-        actions: [
-          { action: 'mark_done', title: 'Mark Done' },
-          { action: 'snooze', title: 'Snooze 10 Minutes' }
-        ]
-      };
-      
-      self.registration.showNotification(item.title, options);
-
-      // Broadcast audio play command to all active client windows
-      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-        windowClients.forEach((client) => {
-          client.postMessage({
-            type: 'PLAY_REMINDER_SOUND',
-            itemId: item.id,
-            title: item.title,
-            description: item.description,
-            time: new Date().toISOString()
-          });
-        });
-      });
-    }
-  });
-}, 30000);
-
-// Listen for push events dispatched from the server
-self.addEventListener('push', function(event) {
-  if (!event.data) return;
-
-  try {
-    const data = event.data.json();
-    const notification = data.notification;
-
-    const options = {
-      body: notification.body,
-      icon: notification.icon || '/icons/icon-192x192.png',
-      badge: notification.badge || '/icons/icon-72x72.png',
-      vibrate: [300, 100, 300, 100, 400],
-      data: notification.data || {},
-      actions: [
-        { action: 'mark_done', title: 'Mark Done' },
-        { action: 'snooze', title: 'Snooze 10 Minutes' }
-      ],
-      tag: notification.data?.itemId || 'alert',
-      requireInteraction: true,
+const openDatabase = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
     };
+    request.onsuccess = (event) => resolve(event.target.result);
+    request.onerror = (event) => reject(event.target.error);
+  });
+};
 
-    event.waitUntil(
-      Promise.all([
-        self.registration.showNotification(notification.title, options),
+const getStoredReminders = async () => {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.error('IDB getStoredReminders error:', err);
+    return [];
+  }
+};
+
+const saveStoredReminders = async (reminders) => {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    store.clear();
+    for (const item of reminders) {
+      store.put(item);
+    }
+  } catch (err) {
+    console.error('IDB saveStoredReminders error:', err);
+  }
+};
+
+const removeStoredReminder = async (id) => {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    store.delete(id);
+  } catch (err) {
+    console.error('IDB removeStoredReminder error:', err);
+  }
+};
+
+// Background reminder check loop (runs every 30 seconds)
+setInterval(async () => {
+  try {
+    const now = new Date();
+    const stored = await getStoredReminders();
+    let modified = false;
+
+    for (const item of stored) {
+      if (!item.triggered && new Date(item.reminderTime) <= now) {
+        item.triggered = true;
+        modified = true;
+
+        const options = {
+          body: `Reminder: ${item.description || 'Your task is starting soon.'}`,
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-72x72.png',
+          vibrate: [300, 100, 300, 100, 400],
+          tag: `schedule-${item.id}`,
+          requireInteraction: true,
+          data: {
+            itemId: item.id,
+            url: `/schedule?date=${new Date(item.reminderTime).toISOString().split('T')[0]}`
+          },
+          actions: [
+            { action: 'mark_done', title: 'Mark Done' },
+            { action: 'snooze', title: 'Snooze 10 Minutes' }
+          ]
+        };
+
+        self.registration.showNotification(item.title, options);
+
+        // Notify active windows to play sound alert
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
           windowClients.forEach((client) => {
             client.postMessage({
               type: 'PLAY_REMINDER_SOUND',
-              itemId: notification.data?.itemId,
-              title: notification.title,
-              description: notification.body,
+              itemId: item.id,
+              title: item.title,
+              description: item.description,
+              time: new Date().toISOString()
+            });
+          });
+        });
+      }
+    }
+
+    if (modified) {
+      await saveStoredReminders(stored);
+    }
+  } catch (err) {
+    console.error('Error in background reminder loop:', err);
+  }
+}, 30000);
+
+// Web Push event listener
+self.addEventListener('push', function(event) {
+  if (!event.data) return;
+
+  try {
+    const payload = event.data.json();
+
+    const options = {
+      body: payload.body,
+      icon: payload.icon || '/icons/icon-192x192.png',
+      badge: payload.badge || '/icons/icon-72x72.png',
+      vibrate: [200, 100, 200],
+      requireInteraction: true,
+      tag: payload.tag || 'generic-notification',
+      renotify: true,
+      data: {
+        url: payload.url || '/dashboard',
+        ticketId: payload.ticketId,
+        itemId: payload.itemId,
+        type: payload.type
+      }
+    };
+
+    if (payload.type === 'CALL') {
+      options.vibrate = [500, 250, 500, 250, 500, 250, 500, 250, 500];
+    }
+
+    event.waitUntil(
+      Promise.all([
+        self.registration.showNotification(payload.title, options),
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+          windowClients.forEach((client) => {
+            client.postMessage({
+              type: 'INCOMING_PUSH_ALERT',
+              notificationType: payload.type,
+              ticketId: payload.ticketId,
+              itemId: payload.itemId,
+              title: payload.title,
+              body: payload.body,
               time: new Date().toISOString()
             });
           });
@@ -92,42 +165,44 @@ self.addEventListener('push', function(event) {
   }
 });
 
-// Receive schedules from the page scripts
-self.addEventListener('message', function(event) {
+// Message listener for page schedule sync calls
+self.addEventListener('message', async function(event) {
   const data = event.data;
   if (!data) return;
 
   switch (data.type) {
+    case 'SET_REMINDERS':
+    case 'SYNC_SCHEDULE': {
+      if (Array.isArray(data.items)) {
+        const itemsMapped = data.items.map(item => ({
+          id: item._id || item.id,
+          title: item.title,
+          description: item.description,
+          reminderTime: item.reminderTime,
+          triggered: item.reminderStatus === 'delivered'
+        }));
+        await saveStoredReminders(itemsMapped);
+      }
+      break;
+    }
     case 'SCHEDULE_REMINDER': {
-      // Remove any existing copy to prevent duplicates
-      remindersSchedule = remindersSchedule.filter(r => r.id !== data.item.id);
-      remindersSchedule.push({
+      const stored = await getStoredReminders();
+      const filtered = stored.filter(r => r.id !== data.item.id);
+      filtered.push({
         id: data.item.id,
         title: data.item.title,
         description: data.item.description,
         reminderTime: data.item.reminderTime,
         triggered: false
       });
+      await saveStoredReminders(filtered);
       break;
     }
     case 'CANCEL_REMINDER': {
-      remindersSchedule = remindersSchedule.filter(r => r.id !== data.id);
-      break;
-    }
-    case 'SYNC_SCHEDULE': {
-      if (Array.isArray(data.items)) {
-        remindersSchedule = data.items.map(item => ({
-          id: item._id,
-          title: item.title,
-          description: item.description,
-          reminderTime: item.reminderTime,
-          triggered: item.reminderStatus === 'delivered'
-        }));
-      }
+      await removeStoredReminder(data.id);
       break;
     }
     case 'TRIGGER_TEST': {
-      // Immediate OS tray notification for diagnostics
       const testOptions = {
         body: 'Your reminders are set up correctly and will appear here',
         icon: '/icons/icon-192x192.png',
@@ -149,53 +224,51 @@ self.addEventListener('message', function(event) {
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
 
-  const itemId = event.notification.data?.itemId;
-  const actionToken = event.notification.data?.actionToken;
-  const deepLink = event.notification.data?.url || '/schedule';
+  const data = event.notification.data || {};
+  const deepLink = data.url || '/dashboard';
+  const itemId = data.itemId;
 
   if (event.action === 'mark_done' && itemId) {
-    const url = actionToken 
-      ? `/api/schedule/items/${itemId}/complete-bg?actionToken=${actionToken}`
-      : `/api/schedule/items/${itemId}/complete-bg`;
-      
     event.waitUntil(
-      fetch(url, {
+      fetch(`/api/schedule/items/${itemId}/complete-bg`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       }).then((res) => {
         if (!res.ok) console.error('Failed to mark task done in background.');
       })
     );
+    return;
   } else if (event.action === 'snooze' && itemId) {
-    const url = actionToken 
-      ? `/api/schedule/items/${itemId}/snooze-bg?actionToken=${actionToken}`
-      : `/api/schedule/items/${itemId}/snooze-bg`;
-      
     event.waitUntil(
-      fetch(url, {
+      fetch(`/api/schedule/items/${itemId}/snooze-bg`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       }).then((res) => {
         if (!res.ok) console.error('Failed to snooze task in background.');
       })
     );
-  } else {
-    // Open application and focus window
-    event.waitUntil(
-      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-        for (let i = 0; i < windowClients.length; i++) {
-          const client = windowClients[i];
-          if (client.url.includes('/schedule') && 'focus' in client) {
-            client.postMessage({ type: 'PLAY_REMINDER_SOUND', itemId, clicked: true });
-            return client.focus();
-          }
-        }
-        if (self.clients.openWindow) {
-          return self.clients.openWindow(deepLink).then((win) => {
-            if (win) setTimeout(() => win.postMessage({ type: 'PLAY_REMINDER_SOUND', itemId, clicked: true }), 1500);
-          });
-        }
-      })
-    );
+    return;
   }
+
+  // Navigate & focus
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (let i = 0; i < windowClients.length; i++) {
+        const client = windowClients[i];
+        if ('focus' in client) {
+          client.postMessage({ 
+            type: 'NOTIFICATION_CLICKED', 
+            url: deepLink,
+            ticketId: data.ticketId,
+            itemId: data.itemId,
+            notificationType: data.type
+          });
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(deepLink);
+      }
+    })
+  );
 });

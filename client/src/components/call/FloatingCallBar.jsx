@@ -101,17 +101,19 @@ export function FloatingCallBar() {
           </button>
 
           {/* Speaker button */}
-          <button
-            onClick={toggleSpeaker}
-            className={`p-2.5 rounded-xl border transition-all active:scale-90 touch-target ${
-              !isSpeaker
-                ? 'bg-[#151c2d] border-borderColor text-text-secondary/40'
-                : 'bg-[#151c2d] border-borderColor text-text-secondary hover:text-text-primary'
-            }`}
-            title={isSpeaker ? "Disable Speaker" : "Enable Speaker"}
-          >
-            {isSpeaker ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-          </button>
+          {typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype && (
+            <button
+              onClick={toggleSpeaker}
+              className={`p-2.5 rounded-xl border transition-all active:scale-90 touch-target ${
+                !isSpeaker
+                  ? 'bg-[#151c2d] border-borderColor text-text-secondary/40'
+                  : 'bg-[#151c2d] border-borderColor text-text-secondary hover:text-text-primary'
+              }`}
+              title={isSpeaker ? "Disable Speaker" : "Enable Speaker"}
+            >
+              {isSpeaker ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+          )}
 
           {/* End Call button */}
           <button

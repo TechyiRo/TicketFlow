@@ -10,6 +10,59 @@ export const CallProvider = ({ children }) => {
   const { user } = useAuth();
   const { socket } = useChat();
 
+  // Ringtone player helper using Web Audio API
+  const ringtonePlayerRef = useRef({
+    audioCtx: null,
+    interval: null,
+    playChime: function() {
+      try {
+        if (!this.audioCtx) {
+          this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = this.audioCtx;
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+        const now = ctx.currentTime;
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        
+        osc1.frequency.setValueAtTime(440, now);
+        osc2.frequency.setValueAtTime(480, now);
+        
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(0.5, now + 0.1);
+        gainNode.gain.setValueAtTime(0.5, now + 1.2);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
+        
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 1.5);
+        osc2.stop(now + 1.5);
+      } catch (err) {
+        console.error('Failed to play Web Audio ringtone:', err);
+      }
+    },
+    start: function() {
+      this.stop();
+      this.playChime();
+      this.interval = setInterval(() => {
+        this.playChime();
+      }, 3000);
+    },
+    stop: function() {
+      if (this.interval) {
+        clearInterval(this.interval);
+        this.interval = null;
+      }
+    }
+  });
+
   // Call state parameters
   const [callState, setCallState] = useState('idle'); // 'idle' | 'calling' | 'incoming' | 'connected'
   const [activeTicketId, setActiveTicketId] = useState(null);
@@ -56,6 +109,9 @@ export const CallProvider = ({ children }) => {
 
   // Terminate and clean all peer streams
   const cleanupStreamsAndPeers = useCallback(() => {
+    // Stop ringtone loop
+    ringtonePlayerRef.current.stop();
+
     // Stop local micro track
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -150,8 +206,15 @@ export const CallProvider = ({ children }) => {
     callStartTimeRef.current = new Date();
 
     try {
-      // Capture audio stream
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // Capture audio stream with high-quality constraints
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
       localStreamRef.current = stream;
 
       // Broadcast invite over socket
@@ -183,8 +246,18 @@ export const CallProvider = ({ children }) => {
   const acceptCall = useCallback(async () => {
     if (!socket || !user || !activeTicketId) return;
 
+    // Stop ringtone loop
+    ringtonePlayerRef.current.stop();
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
       localStreamRef.current = stream;
 
       setCallState('connected');
@@ -214,6 +287,9 @@ export const CallProvider = ({ children }) => {
   const declineCall = useCallback(() => {
     if (!socket || !user || !activeTicketId) return;
 
+    // Stop ringtone loop
+    ringtonePlayerRef.current.stop();
+
     socket.emit('respond_call', {
       ticketId: activeTicketId,
       accepted: false,
@@ -231,12 +307,25 @@ export const CallProvider = ({ children }) => {
       return peerConnectionsRef.current.get(peerId);
     }
 
+    // Configure STUN and TURN server credentials to bypass NATs/firewalls
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelay',
+          credential: 'openrelay'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=udp',
+          username: 'openrelay',
+          credential: 'openrelay'
+        }
       ]
     });
+
+    pc.candidateQueue = [];
 
     // Monitor connection drops
     pc.oniceconnectionstatechange = () => {
@@ -281,6 +370,7 @@ export const CallProvider = ({ children }) => {
     };
 
     pc.ontrack = (event) => {
+      console.log('[WebRTC]: Remote track arrived');
       const remoteStream = event.streams[0];
       let audioEl = document.getElementById(`audio-peer-${peerId}`);
       if (!audioEl) {
@@ -291,9 +381,11 @@ export const CallProvider = ({ children }) => {
         document.body.appendChild(audioEl);
       }
       audioEl.srcObject = remoteStream;
+      audioEl.volume = 1.0;
+      audioEl.play().catch((err) => console.error('[WebRTC]: Remote audio play failed:', err));
     };
 
-    // Append local stream track
+    // Append local stream track BEFORE creating offers/answers
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         pc.addTrack(track, localStreamRef.current);
@@ -315,10 +407,35 @@ export const CallProvider = ({ children }) => {
     }
   };
 
-  // Mock speaker toggling
-  const toggleSpeaker = () => {
-    setIsSpeaker(!isSpeaker);
-    toast.success(isSpeaker ? 'Audio routed to earpiece.' : 'Audio routed to speaker.');
+  // Routing audio outputs dynamically using setSinkId (earpiece vs speakerphone)
+  const toggleSpeaker = async () => {
+    try {
+      const isSpeakerNext = !isSpeaker;
+      setIsSpeaker(isSpeakerNext);
+      
+      const audioElements = document.querySelectorAll('audio[id^="audio-peer-"]');
+      if (audioElements.length > 0) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+        
+        let targetDevice = null;
+        if (isSpeakerNext) {
+          targetDevice = audioOutputs.find(d => d.label.toLowerCase().includes('speaker') || d.label.toLowerCase().includes('hands-free'));
+        } else {
+          targetDevice = audioOutputs.find(d => d.label.toLowerCase().includes('earpiece') || d.label.toLowerCase().includes('headset') || d.label.toLowerCase().includes('receiver'));
+        }
+        
+        const deviceId = targetDevice ? targetDevice.deviceId : '';
+        for (const audioEl of audioElements) {
+          if ('setSinkId' in audioEl) {
+            await audioEl.setSinkId(deviceId);
+          }
+        }
+      }
+      toast.success(isSpeakerNext ? 'Audio routed to speaker.' : 'Audio routed to earpiece.');
+    } catch (err) {
+      console.error('[WebRTC]: setSinkId failed:', err);
+    }
   };
 
   // Socket signaling integrations
@@ -339,6 +456,9 @@ export const CallProvider = ({ children }) => {
         setCallerRole(callerRole);
         setParticipants([callerName]);
         
+        // Start playing the local ringtone loop
+        ringtonePlayerRef.current.start();
+
         socket.emit('join_call_session', { ticketId, userId: user.id, userName: user.fullName });
         return 'incoming';
       });
@@ -357,6 +477,9 @@ export const CallProvider = ({ children }) => {
         setCallerRole(callerRole);
         setParticipants([callerName]);
         
+        // Start playing the local ringtone loop
+        ringtonePlayerRef.current.start();
+
         socket.emit('join_call_session', { ticketId, userId: user.id, userName: user.fullName });
         return 'incoming';
       });
@@ -414,6 +537,16 @@ export const CallProvider = ({ children }) => {
         const pc = getOrCreatePeerConnection(senderId);
         if (signal.type === 'offer') {
           await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          
+          // Apply queued candidates
+          if (pc.candidateQueue && pc.candidateQueue.length > 0) {
+            console.log(`[WebRTC]: Applying ${pc.candidateQueue.length} queued ICE candidates`);
+            for (const cand of pc.candidateQueue) {
+              await pc.addIceCandidate(cand).catch(e => console.error('Queued candidate error:', e));
+            }
+            pc.candidateQueue = [];
+          }
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
@@ -424,8 +557,23 @@ export const CallProvider = ({ children }) => {
           });
         } else if (signal.type === 'answer') {
           await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+
+          // Apply queued candidates
+          if (pc.candidateQueue && pc.candidateQueue.length > 0) {
+            console.log(`[WebRTC]: Applying ${pc.candidateQueue.length} queued ICE candidates`);
+            for (const cand of pc.candidateQueue) {
+              await pc.addIceCandidate(cand).catch(e => console.error('Queued candidate error:', e));
+            }
+            pc.candidateQueue = [];
+          }
         } else if (signal.type === 'candidate' && signal.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+          const rtcCandidate = new RTCIceCandidate(signal.candidate);
+          if (pc.remoteDescription && pc.remoteDescription.type) {
+            await pc.addIceCandidate(rtcCandidate);
+          } else {
+            console.log('[WebRTC]: Queueing incoming ICE candidate');
+            pc.candidateQueue.push(rtcCandidate);
+          }
         }
       } catch (err) {
         console.error('WebRTC signal processing failed:', err);

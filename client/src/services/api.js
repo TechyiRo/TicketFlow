@@ -4,12 +4,15 @@ import toast from 'react-hot-toast';
 
 let accessToken = '';
 
-/**
- * Update the memory-stored access token
- * @param {string} token 
- */
 export const setAccessToken = (token) => {
   accessToken = token;
+  if (token && typeof window !== 'undefined' && window.__swRegistration) {
+    import('../pwa/registerSW')
+      .then(({ syncPushSubscription }) => {
+        syncPushSubscription(window.__swRegistration);
+      })
+      .catch((err) => console.error('[SW Sync] Failed to load sync module:', err));
+  }
 };
 
 /**

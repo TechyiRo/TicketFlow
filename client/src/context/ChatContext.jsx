@@ -17,10 +17,22 @@ export const ChatProvider = ({ children }) => {
   
   // Custom stacking notifications toasts
   const [notifications, setNotifications] = useState([]);
+  const [connectionState, setConnectionState] = useState('connected'); // 'connected' | 'reconnecting' | 'offline'
   
   const socketRef = useRef(null);
   const activeTicketIdRef = useRef(null);
+  const lastMessageIdRef = useRef(null);
   const navigate = useNavigate();
+
+  // Track the last successfully persisted message ID
+  useEffect(() => {
+    if (messages && messages.length > 0) {
+      const realMsgs = messages.filter(m => m._id && !m._id.startsWith('temp-'));
+      if (realMsgs.length > 0) {
+        lastMessageIdRef.current = realMsgs[realMsgs.length - 1]._id;
+      }
+    }
+  }, [messages]);
 
   useEffect(() => {
     activeTicketIdRef.current = activeTicketId;
@@ -51,23 +63,84 @@ export const ChatProvider = ({ children }) => {
     const socketUrl = getSocketUrl();
     console.log(`Connecting Socket.IO to ${socketUrl}...`);
     
+    // Explicit exponential backoff parameters
     const s = io(socketUrl, {
       withCredentials: true,
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 30000,
+      randomizationFactor: 0,
+      reconnectionAttempts: Infinity
     });
 
     socketRef.current = s;
     setSocket(s);
 
+    let pingInterval;
+    let pongTimeout;
+
+    const startHeartbeat = () => {
+      clearInterval(pingInterval);
+      pingInterval = setInterval(() => {
+        if (s.connected) {
+          s.emit('ping_heartbeat');
+          
+          clearTimeout(pongTimeout);
+          pongTimeout = setTimeout(() => {
+            console.warn('[Heartbeat]: Pong timeout. Attempting socket reconnect...');
+            setConnectionState('reconnecting');
+            s.disconnect();
+            s.connect();
+          }, 10000);
+        }
+      }, 25000);
+    };
+
+    const stopHeartbeat = () => {
+      clearInterval(pingInterval);
+      clearTimeout(pongTimeout);
+    };
+
     s.on('connect', () => {
       console.log('Socket.IO connection established.');
+      setConnectionState('connected');
+      startHeartbeat();
+
+      // Join room if active room exists
       if (activeTicketIdRef.current) {
         s.emit('join_room', { 
           ticketId: activeTicketIdRef.current, 
           userId: user.id, 
           role: user.role 
         });
+
+        // Request missed messages since disconnect window
+        if (lastMessageIdRef.current) {
+          console.log(`[Socket]: Requesting missed messages since ${lastMessageIdRef.current}`);
+          s.emit('request_missed_messages', {
+            ticketId: activeTicketIdRef.current,
+            lastMessageId: lastMessageIdRef.current
+          });
+        }
       }
+    });
+
+    s.on('pong_heartbeat', () => {
+      clearTimeout(pongTimeout);
+    });
+
+    s.on('connect_error', () => {
+      setConnectionState('reconnecting');
+    });
+
+    s.on('reconnect_attempt', () => {
+      setConnectionState('reconnecting');
+    });
+
+    s.on('reconnect_failed', () => {
+      setConnectionState('offline');
+      stopHeartbeat();
     });
 
     s.on('receive_message', (message) => {
@@ -83,7 +156,9 @@ export const ChatProvider = ({ children }) => {
             return prev.map(m => m._id === message.tempId ? message : m);
           }
           
-          if (prev.find(m => m._id === message._id)) return prev;
+          const duplicate = prev.some(m => m._id === message._id);
+          if (duplicate) return prev;
+          
           return [...prev, message];
         });
         
@@ -172,12 +247,15 @@ export const ChatProvider = ({ children }) => {
 
     s.on('disconnect', () => {
       console.log('Socket.IO connection disconnected.');
+      setConnectionState('reconnecting');
+      stopHeartbeat();
     });
 
     return () => {
       s.disconnect();
       socketRef.current = null;
       setSocket(null);
+      stopHeartbeat();
     };
   }, [user]);
 
@@ -388,6 +466,25 @@ export const ChatProvider = ({ children }) => {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* Floating Global Socket Connection Indicator */}
+      {user && (
+        <div 
+          id="socket-connection-indicator"
+          className="fixed bottom-4 left-4 z-50 flex items-center gap-2 bg-background-elevated/90 backdrop-blur border border-borderColor px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg select-none pointer-events-none transition-all duration-300"
+        >
+          <span className={`w-2 h-2 rounded-full ${
+            connectionState === 'connected' ? 'bg-success-base shadow-[0_0_8px_#10b981]' :
+            connectionState === 'reconnecting' ? 'bg-warning-base animate-pulse shadow-[0_0_8px_#f59e0b]' :
+            'bg-error-base shadow-[0_0_8px_#ef4444]'
+          }`} />
+          <span className="text-text-primary capitalize tracking-wide">
+            {connectionState === 'connected' ? 'Connected' :
+             connectionState === 'reconnecting' ? 'Reconnecting' :
+             'Offline'}
+          </span>
         </div>
       )}
     </ChatContext.Provider>

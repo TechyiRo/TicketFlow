@@ -99,6 +99,16 @@ export function ScheduleItemCard({ item, onEdit, onDelete, onToggleComplete, rea
     setLocalReminderEnabled(!!item.reminderEnabled);
   }, [item.reminderEnabled]);
 
+  const saveTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleToggleReminder = async (e) => {
     e.stopPropagation();
     const nextState = !localReminderEnabled;
@@ -128,40 +138,48 @@ export function ScheduleItemCard({ item, onEdit, onDelete, onToggleComplete, rea
       }
     }
 
-    // Optimistic UI Update
+    // Optimistic UI Update (instant response)
     setLocalReminderEnabled(nextState);
     setInlineError('');
 
-    try {
-      const updatedItem = await scheduleService.updateItem(item._id, {
-        ...item,
-        reminderEnabled: nextState
-      });
-
-      // Notify service worker
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        if (nextState) {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'SCHEDULE_REMINDER',
-            item: {
-              id: item._id,
-              title: item.title,
-              description: item.description,
-              reminderTime: updatedItem.reminderTime || item.reminderTime || item.startTime
-            }
-          });
-        } else {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'CANCEL_REMINDER',
-            id: item._id
-          });
-        }
+    // Immediate Local Service Worker sync
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      if (nextState) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SCHEDULE_REMINDER',
+          item: {
+            id: item._id,
+            title: item.title,
+            description: item.description,
+            reminderTime: item.reminderTime || item.startTime
+          }
+        });
+      } else {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'CANCEL_REMINDER',
+          id: item._id
+        });
       }
-    } catch (err) {
-      console.error('Failed to sync reminder setting:', err);
-      setLocalReminderEnabled(!nextState);
-      toast.error('Failed to update reminder settings.');
     }
+
+    // Debounced database network sync
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await scheduleService.updateItem(item._id, {
+          ...item,
+          reminderEnabled: nextState
+        });
+        console.log(`Database synchronized reminder state for ${item._id} to ${nextState}`);
+      } catch (err) {
+        console.error('Failed to sync reminder setting to database:', err);
+        setLocalReminderEnabled(!nextState);
+        toast.error('Failed to save reminder setting.');
+      }
+    }, 500);
   };
 
   return (
