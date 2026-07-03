@@ -44,15 +44,18 @@ exports.registerUser = async (req, res) => {
   try {
     const { fullName, username, password, avatar, companyName, companyAddress, contactNumber, companyEmail } = req.body;
 
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
     // Check if username exists in User or Employee database
-    const existingUser = await User.findOne({ username: username.toLowerCase() });
-    const existingEmp = await Employee.findOne({ username: username });
+    const existingUser = await User.findOne({ username: cleanUsername });
+    const existingEmp = await Employee.findOne({ username: cleanUsername });
     if (existingUser || existingEmp) {
       return res.status(400).json({ message: 'Username is already taken' });
     }
 
     // Hash password
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(cleanPassword, 10);
 
     // Handle logo upload if provided
     let logoUrl = '';
@@ -62,9 +65,9 @@ exports.registerUser = async (req, res) => {
 
     const newUser = new User({
       fullName,
-      username: username.toLowerCase(),
+      username: cleanUsername,
       passwordHash,
-      plainTextPassword: password,
+      plainTextPassword: cleanPassword,
       avatar,
       company: {
         name: companyName,
@@ -109,22 +112,26 @@ exports.registerEmployee = async (req, res) => {
   try {
     const { fullName, username, email, password, avatar, department } = req.body;
 
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
     // Check if username/email exists
-    const existingUser = await User.findOne({ username: username.toLowerCase() });
-    const existingEmp = await Employee.findOne({ $or: [{ username }, { email: email.toLowerCase() }] });
+    const existingUser = await User.findOne({ username: cleanUsername });
+    const existingEmp = await Employee.findOne({ $or: [{ username: cleanUsername }, { email: cleanEmail }] });
     if (existingUser || existingEmp) {
       return res.status(400).json({ message: 'Username or Email is already registered' });
     }
 
     // Hash password
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(cleanPassword, 10);
 
     const newEmployee = new Employee({
       fullName,
-      username,
-      email: email.toLowerCase(),
+      username: cleanUsername,
+      email: cleanEmail,
       passwordHash,
-      plainTextPassword: password,
+      plainTextPassword: cleanPassword,
       avatar: avatar || '',
       department,
     });
@@ -294,10 +301,11 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: 'Username and password are required' });
     }
 
-    const usernameLower = username.toLowerCase();
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanPassword = password.trim();
 
     // 1. Hardcoded Admin login check
-    if (usernameLower === 'admin' && password === 'WinRo') {
+    if (cleanUsername === 'admin' && cleanPassword === 'WinRo') {
       let adminAccount = await Employee.findOne({ username: 'admin' });
       if (!adminAccount) {
         const passwordHash = await bcrypt.hash('WinRo', 10);
@@ -340,11 +348,11 @@ exports.login = async (req, res) => {
 
     // 2. Normal employee / admin check in Employee collection
     let employee = await Employee.findOne({
-      $or: [{ username: username }, { email: usernameLower }],
+      $or: [{ username: cleanUsername }, { email: cleanUsername }],
     });
 
     if (employee && employee.isActive) {
-      const isMatch = await bcrypt.compare(password, employee.passwordHash);
+      const isMatch = await bcrypt.compare(cleanPassword, employee.passwordHash);
       if (isMatch) {
         const { accessToken, refreshToken } = generateTokens(employee);
         employee.refreshToken = refreshToken;
@@ -368,9 +376,9 @@ exports.login = async (req, res) => {
     }
 
     // 3. Normal user check in User collection
-    const user = await User.findOne({ username: usernameLower });
+    const user = await User.findOne({ username: cleanUsername });
     if (user) {
-      const isMatch = await bcrypt.compare(password, user.passwordHash);
+      const isMatch = await bcrypt.compare(cleanPassword, user.passwordHash);
       if (isMatch) {
         const { accessToken, refreshToken } = generateTokens(user);
         user.refreshToken = refreshToken;
