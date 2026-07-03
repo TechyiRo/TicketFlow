@@ -6,7 +6,6 @@ import BottomTabBar from '../dashboard/BottomTabBar';
 import OfflineBanner from '../pwa/OfflineBanner';
 import InstallBanner from '../pwa/InstallBanner';
 import UpdatePrompt from '../pwa/UpdatePrompt';
-import ChatFAB from '../chat/ChatFAB';
 import { useAuth } from '../../context/AuthContext';
 import scheduleService from '../../services/scheduleService';
 import { Bell, Check, Clock, X, Volume2 } from 'lucide-react';
@@ -228,8 +227,7 @@ export function AppShell({ children }) {
         </div>
       </div>
 
-      {/* Floating Action Button for Chat */}
-      <ChatFAB />
+
 
       {/* Mobile Bottom Navigation: Visible on sm and below */}
       <BottomTabBar />
