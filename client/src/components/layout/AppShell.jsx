@@ -7,6 +7,8 @@ import OfflineBanner from '../pwa/OfflineBanner';
 import InstallBanner from '../pwa/InstallBanner';
 import UpdatePrompt from '../pwa/UpdatePrompt';
 import { useAuth } from '../../context/AuthContext';
+import { useChat } from '../../context/ChatContext';
+import ChatWindow from '../chat/ChatWindow';
 import scheduleService from '../../services/scheduleService';
 import { Bell, Check, Clock, X, Volume2 } from 'lucide-react';
 
@@ -15,6 +17,7 @@ import { Bell, Check, Clock, X, Volume2 } from 'lucide-react';
  */
 export function AppShell({ children }) {
   const { user } = useAuth();
+  const { activeTicketId } = useChat();
   const location = useLocation();
 
   // Prevent any browser window scroll bugs (e.g. keyboard focus or event clicks shifting viewport up)
@@ -182,6 +185,15 @@ export function AppShell({ children }) {
   if (!user) return <>{children}</>;
 
   const isMessagesPage = location.pathname === '/messages';
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
+  if (isMobile && activeTicketId) {
+    return (
+      <div className="fixed inset-0 z-[9999] bg-[#030712] w-full h-[100dvh] h-[calc(var(--vh,1vh)*100)] flex flex-col overflow-hidden animate-slideUp">
+        <ChatWindow />
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -202,19 +214,19 @@ export function AppShell({ children }) {
         <InstallBanner />
       </div>
 
-      <div className="flex flex-1 w-full overflow-hidden relative p-4 gap-4">
+      <div className="flex flex-1 w-full overflow-hidden relative p-0 md:p-4 gap-0 md:gap-4">
         {/* Sidebar: Visible on md and above */}
         <Sidebar />
 
         {/* Content Area */}
-        <div className="flex flex-col flex-1 w-full overflow-hidden rounded-2xl glass-panel shadow-glassShadow border border-borderColor/20 relative">
+        <div className="flex flex-col flex-1 w-full overflow-hidden rounded-none md:rounded-2xl bg-transparent md:glass-panel md:shadow-glassShadow border-none md:border border-borderColor/20 relative">
           {/* TopBar Header */}
           <TopBar />
 
           {/* Main Body Scrollable */}
-          <main className={`flex-1 w-full px-4 py-6 md:px-8 min-h-0 flex flex-col ${
+          <main className={`flex-1 w-full px-0 py-4 md:px-8 md:py-6 min-h-0 flex flex-col ${
             isMessagesPage 
-              ? 'overflow-hidden pb-6 md:pb-6' 
+              ? 'overflow-hidden pb-4 md:pb-6' 
               : 'overflow-y-auto pb-[calc(80px+env(safe-area-inset-bottom))] md:pb-6'
           }`}>
             <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0">

@@ -100,7 +100,7 @@ export function LoginForm({ onToggleForm, onSubmitSuccess }) {
         type="submit"
         variant="primary"
         loading={loading}
-        className="w-full mt-2"
+        className="w-full mt-2 h-[52px] md:h-11 min-h-[52px] md:min-h-[44px]"
       >
         Sign In to Portal
       </Button>

@@ -4,6 +4,19 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
+/* Mobile Viewport and Zoom Fixes */
+input, textarea, select, [contenteditable="true"], [contenteditable] {
+  font-size: 16px !important;
+}
+
+button, a, select, input[type="checkbox"], input[type="radio"], [role="button"], .glass-card, .ticket-card, li, .touch-target {
+  touch-action: manipulation !important;
+}
+
+html, body {
+  overscroll-behavior: none !important;
+}
+
 /* Global Reset & Dynamic Viewport Height */
 html, body, #root {
   background-color: #05070F; /* Sleeker, deeper dark slate */
@@ -13,6 +26,7 @@ html, body, #root {
   padding: 0;
   width: 100%;
   height: 100dvh;
+  height: calc(var(--vh, 1vh) * 100) !important;
   min-height: -webkit-fill-available;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;

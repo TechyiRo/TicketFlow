@@ -162,6 +162,11 @@ export const ChatProvider = ({ children }) => {
           return [...prev, message];
         });
         
+        // Haptic feedback: 20ms on message received while chat is open
+        if (message.senderId !== user.id && typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate(20);
+        }
+
         // Immediately notify server that we read it
         s.emit('read_messages', { ticketId: currentActiveId, userId: user.id });
         chatService.markAsRead(currentActiveId).catch(console.error);
@@ -171,6 +176,11 @@ export const ChatProvider = ({ children }) => {
           ...prev,
           [message.ticketId]: (prev[message.ticketId] || 0) + 1,
         }));
+
+        // Haptic feedback: 50ms vibration when notification badge appears
+        if (message.senderId !== user.id && typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate(50);
+        }
 
         // Trigger toast notification
         const toastId = Math.random().toString(36).substring(7);
@@ -294,9 +304,14 @@ export const ChatProvider = ({ children }) => {
   }, []);
 
   // Send message
-  const sendMessage = useCallback(async (content, attachments = []) => {
+  const sendMessage = useCallback(async (content, attachments = [], replyTo = null) => {
     const currentActiveId = activeTicketIdRef.current;
     if (!currentActiveId || !user) return;
+
+    // Haptic feedback: 10ms on message sent
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(10);
+    }
 
     // Generate optimistic ID
     const tempId = 'temp-' + Date.now();
@@ -309,6 +324,7 @@ export const ChatProvider = ({ children }) => {
       senderAvatar: user.avatar || '',
       content: content ? content.trim() : '',
       attachments: attachments || [],
+      replyTo: replyTo,
       readBy: [user.id],
       status: 'sending',
       createdAt: new Date().toISOString(),
@@ -326,6 +342,7 @@ export const ChatProvider = ({ children }) => {
       senderName: user.fullName,
       senderAvatar: user.avatar,
       attachments,
+      replyTo,
     };
 
     if (socketRef.current && socketRef.current.connected) {
@@ -333,7 +350,7 @@ export const ChatProvider = ({ children }) => {
     } else {
       // Fallback via HTTP REST API
       try {
-        const savedMsg = await chatService.sendMessageFallback(currentActiveId, content, attachments);
+        const savedMsg = await chatService.sendMessageFallback(currentActiveId, content, attachments, replyTo);
         setMessages((prev) =>
           prev.map((m) => (m._id === tempId ? savedMsg : m))
         );

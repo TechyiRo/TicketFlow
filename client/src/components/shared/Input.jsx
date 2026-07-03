@@ -38,7 +38,7 @@ export const Input = forwardRef(({
           type={type}
           ref={ref}
           placeholder={placeholder}
-          className={`w-full h-11 bg-white/5 border rounded-lg text-sm text-text-primary px-4 py-2.5 transition-all duration-300 placeholder:text-text-secondary/40 focus:outline-none focus:border-accent-primary/80 focus:bg-white/10 focus:ring-2 focus:ring-accent-primary/20 focus:shadow-neonIndigo ${
+          className={`w-full h-[52px] md:h-11 bg-white/5 border rounded-lg text-[16px] md:text-sm text-text-primary px-4 py-2.5 transition-all duration-300 placeholder:text-text-secondary/40 focus:outline-none focus:border-accent-primary/80 focus:bg-white/10 focus:ring-2 focus:ring-accent-primary/20 focus:shadow-neonIndigo ${
             Icon ? 'pl-11' : ''
           } ${
             rightElement ? 'pr-11' : ''
