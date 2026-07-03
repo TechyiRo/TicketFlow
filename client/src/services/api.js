@@ -21,14 +21,22 @@ export const getAccessToken = () => {
 };
 
 const getBaseURL = () => {
-  if (import.meta.env.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL;
+  let url = import.meta.env.VITE_API_BASE_URL;
+  
+  if (!url && typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+    url = 'https://ticketflow-33vf.onrender.com/api';
   }
-  // Bulletproof fallback for Vercel static deployments pointing to Render
-  if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
-    return 'https://ticketflow-33vf.onrender.com/api';
+  
+  if (!url) {
+    url = '/api';
   }
-  return '/api';
+
+  // Self-correcting: Automatically append /api if missing from Render backend url
+  if (url.includes('onrender.com') && !url.endsWith('/api') && !url.endsWith('/api/')) {
+    url = url.endsWith('/') ? `${url}api` : `${url}/api`;
+  }
+  
+  return url;
 };
 
 const api = axios.create({
